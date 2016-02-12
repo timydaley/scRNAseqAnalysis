@@ -1,0 +1,94 @@
+---
+title: "Analysis of Drop-seq data"
+output: html_document
+---
+
+In this document I will be detailing the analysis of Drop-seq data we received from Sisi Chen of the Thomson lab out of UCSF.  
+
+#  Preliminary analysis
+
+We have 4 datasets from 4 timepoints, multiplexed on an Illumina HiSeq.  The timepoints correspond to the following barcodes:
+
+* Day 0: AAGGAGTA
+* Day 1: ACTGCATA
+* Day 5: CTAAGCCT
+* Day 8: GTAAGGAG
+
+Each timepoint was demultiplexed using Illumina software, resulting in 4 pairs of fastq files.  The first mate is 25 base pairs (bp) and the second mate is 50 bp.  The first mate should correspond to the 12 bp cell barcode and a 8 bp unique molecular identifier.  To verify the former, we can look at the distribution of cell barcodes for barcodes of length 10-14.  We can just look at one of the timepoints.
+
+```{r eval=FALSE}
+par(mfrow = c(1,5))
+for(i in 10:14){
+  x = paste("awk '{if (NR % 4 == 2) print $0}' AAGGAGTA_1.fastq | cut -c 1-", i, " | sort | uniq -c | awk -v OFS='\t' '{print $2, $1}' > AAGGAGTA_", i, "bp_barcode_counts.txt", sep = "")
+  system(x)
+  counts = read.table(file = paste("AAGGAGTA_", i, "bp_barcode_counts.txt", sep = ""))
+  counts_hist = hist(counts[,2], breaks = 0:max(counts[,2]), xlim = c(0, 10))
+}
+```
+
+### Head of counts histogram for first 10-14 bp of AAGGAGTA_1.fastq
+```{r fig.width=6, echo=FALSE}
+library(png)
+library(grid)
+img <- readPNG("AAGGAGTA_10-14bp_counts_hist_1-10.png")
+ grid.raster(img)
+```
+
+
+The total number of counts looks as follows:
+
+total counts | bp 
+------------ | --
+448106       | 10
+721391       | 11
+1094593      | 12
+1940900      | 13
+3745861      | 14
+
+There seems to be a definite jump from 12 to13 bp, indicating that after 12bp the next base is more random than the previous base.  Later, when we take into account UMIs we'll investigate what minimum threshold is needed for a cell barcoded to be counted.
+
+Let's take a look at the nucleotide and quality score distribution using FastQC (http://www.bioinformatics.babraham.ac.uk/projects/fastqc/).
+
+### Cell barcodes nucleotide distribution
+```{r fig.width=4, echo=FALSE}
+library(png)
+library(grid)
+img <- readPNG("AAGGAGTA_cell_barcodes_fastqc/per_base_sequence_content.png")
+ grid.raster(img)
+```
+
+### Cell barcodes nucleotide distribution
+
+```{r fig.width=4, echo=FALSE}
+library(png)
+library(grid)
+img <- readPNG("AAGGAGTA_cell_barcodes_fastqc/per_base_quality.png")
+ grid.raster(img)
+```
+
+
+It seems like there are problems with the nucleotide content of the first few bases.  This is likely due to biases in the experimental protocol of generating barcodes.  It shouldn't concern us too much, but the quality scores should.  The Drop-seq Alignment cookbook v1.1 (http://mccarrolllab.com/wp-content/uploads/2015/05/Drop-seqAlignmentCookbook_v1.1Aug2015.pdf) suggests dropping reads with any quality score below 10, corresponding to a 1 in 10 chance of the nucleotide being incorrect.  This may too lenient, we may want to restict ourselves to a higher quality score standard.  There are a total of 85,689,564 reads in the intial file.  If we restrict ourselves to cell barcodes that have quality scores all above 10 then we get 81,966,026 reads while if we restrict the quality scores to all above 20 then we get 51,876,289 reads. I think we can be liberal here and later remove cells with low barcode counts.  
+
+
+We will first follow the recommendations of the Drop-seqAlignmentCookbook v1.1 (http://mccarrolllab.com/wp-content/uploads/2015/05/Drop-seqAlignmentCookbook_v1.1Aug2015.pdf).  The first step is to extract the read barcodes and UMIs(unique molecular identifiers) from the first mate of the pair and associate them with the read information in the second mate.
+
+```{r engine='bash', eval=FALSE}
+java -jar -Xmx8g ~/picard-tools-1.141/picard.jar FastqToSam F1=input_1.fastq F2=input_2.fastq SORT_ORDER=queryname O=input.sam SM=input
+
+~/Drop-seq_tools-1.12/TagBamWithReadSequenceExtended INPUT=input.sam OUTPUT=input_barcoded.sam BASE_RANGE=1-12 BARCODED_READ=1 TAG_NAME=XBAR SUMMARY=input_cell_barcode_summary.txt BASE_QUALITY\
+=10 NUM_BASES_BELOW_QUALITY=1
+
+~/Drop-seq_tools-1.12/TagBamWithReadSequenceExtended INPUT=input_barcoded.sam OUTPUT=input_barcoded_UMI.sam BASE_RANGE=13-20 BARCODED_READ=1 BASE_QUALITY=10 DISCARD_READ=TRUE TAG_NAME=XUMI
+
+~/Drop-seq_tools-1.12/FilterBam INPUT=input_barcoded_UMI.sam OUTPUT=input_filtered.sam
+
+java -Xmx12g -jar ~/picard-tools-1.141/picard.jar SamToFastq INPUT=input_barcoded_UMI.sam FASTQ=input_barcoded_UMI.fastq
+
+mkdir mapped/
+
+~/aligners/STAR/bin/Linux_x86_64_static/STAR --genomeDir ~/scratch/genomes/mm10/STAR/ --runThreadN 8  --readFilesIn input_barcoded_UMI.fastq --outFileNamePrefix mapped/ --outSAMtype BAM Unsorted
+
+java -jar -Xmx8g ~/picard-tools-1.141/picard.jar MergeBamAlignment UNMAPPED=input_barcoded_UMI.sam ALIGNED=mapped/Alignment.bam REFERENCE_SEQUENCE=~/scratch/genomes/mm10/mm10.fa INCLUDE_SECONDARY_AL\
+IGNMENTS=false PAIRED_RUN=false SORT_ORDER=queryname ALIGNED_READS_ONLY=true
+```
+
