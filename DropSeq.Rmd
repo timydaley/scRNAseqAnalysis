@@ -91,7 +91,7 @@ These look perfectly reasonable, though it looks like Ts get more common in late
 
 ## Getting Digital Gene Expression (DGE)
 
-We will first follow the recommendations of the Drop-seqAlignmentCookbook v1.1 (http://mccarrolllab.com/wp-content/uploads/2015/05/Drop-seqAlignmentCookbook_v1.1Aug2015.pdf).  We use the mm10 genome and gene reference available from McCarroll lab and associated with Gene Expression Omnibus accession GSE63472  (http://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE63472).  We modify a few things from original pipeline.  We collapse cell barcodes and UMIs using an edit distance of 1.  We allow for more cells, or cell barcodes, and require a fewer number of distinct UMIs per cell barcode (10) to count a cell.
+We will first follow the recommendations of the Drop-seqAlignmentCookbook v1.1 (http://mccarrolllab.com/wp-content/uploads/2015/05/Drop-seqAlignmentCookbook_v1.1Aug2015.pdf).  Since there is an issue with the gtf format needed with software provided, we use the mm10 genome and gene reference available from McCarroll lab and associated with Gene Expression Omnibus accession GSE63472  (http://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE63472).  We modify a few things from original pipeline.  We collapse cell barcodes and UMIs using an edit distance of 1.  We allow for more cells, or cell barcodes, and require a fewer number of distinct UMIs per cell barcode (10) to count a cell.
 
 
 ```{r engine='bash', eval=FALSE}
