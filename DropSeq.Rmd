@@ -70,25 +70,46 @@ img <- readPNG("AAGGAGTA_cell_barcodes_fastqc/per_base_quality.png")
 It seems like there are problems with the nucleotide content of the first few bases.  This is likely due to biases in the experimental protocol of generating barcodes.  It shouldn't concern us too much, but the quality scores should.  The Drop-seq Alignment cookbook v1.1 (http://mccarrolllab.com/wp-content/uploads/2015/05/Drop-seqAlignmentCookbook_v1.1Aug2015.pdf) suggests dropping reads with any quality score below 10, corresponding to a 1 in 10 chance of the nucleotide being incorrect.  This may too lenient, we may want to restict ourselves to a higher quality score standard.  There are a total of 85,689,564 reads in the intial file.  If we restrict ourselves to cell barcodes that have quality scores all above 10 then we get 81,966,026 reads while if we restrict the quality scores to all above 20 then we get 51,876,289 reads. I think we can be liberal here and later remove cells with low barcode counts.  
 
 
-We will first follow the recommendations of the Drop-seqAlignmentCookbook v1.1 (http://mccarrolllab.com/wp-content/uploads/2015/05/Drop-seqAlignmentCookbook_v1.1Aug2015.pdf).  The first step is to extract the read barcodes and UMIs(unique molecular identifiers) from the first mate of the pair and associate them with the read information in the second mate.
+We will first follow the recommendations of the Drop-seqAlignmentCookbook v1.1 (http://mccarrolllab.com/wp-content/uploads/2015/05/Drop-seqAlignmentCookbook_v1.1Aug2015.pdf).  We use the mm10 genome and gene reference available from McCarroll lab and associated with Gene Expression Omnibus accession GSE63472  (http://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE63472).  We modify a few things from original pipeline.  We collapse cell barcodes and UMIs using an edit distance of 1.  We allow for more cells, or cell barcodes, and require a fewer number of distinct UMIs per cell barcode (10) to count a cell.
+
 
 ```{r engine='bash', eval=FALSE}
-java -jar -Xmx8g ~/picard-tools-1.141/picard.jar FastqToSam F1=input_1.fastq F2=input_2.fastq SORT_ORDER=queryname O=input.sam SM=input
-
-~/Drop-seq_tools-1.12/TagBamWithReadSequenceExtended INPUT=input.sam OUTPUT=input_barcoded.sam BASE_RANGE=1-12 BARCODED_READ=1 TAG_NAME=XBAR SUMMARY=input_cell_barcode_summary.txt BASE_QUALITY\
-=10 NUM_BASES_BELOW_QUALITY=1
-
-~/Drop-seq_tools-1.12/TagBamWithReadSequenceExtended INPUT=input_barcoded.sam OUTPUT=input_barcoded_UMI.sam BASE_RANGE=13-20 BARCODED_READ=1 BASE_QUALITY=10 DISCARD_READ=TRUE TAG_NAME=XUMI
-
-~/Drop-seq_tools-1.12/FilterBam INPUT=input_barcoded_UMI.sam OUTPUT=input_filtered.sam
-
-java -Xmx12g -jar ~/picard-tools-1.141/picard.jar SamToFastq INPUT=input_barcoded_UMI.sam FASTQ=input_barcoded_UMI.fastq
-
+mkdir tmp
+java -jar -Xmx8g ~/picard-tools-1.141/picard.jar FastqToSam F1=input_R1.fastq F2=input_R2.fastq SORT_ORDER=queryname O=input.sam SM=input TMP_DIR=tmp
+rm -r tmp/
+~/Drop-seq_tools-1.12/TagBamWithReadSequenceExtended INPUT=input.sam OUTPUT=input_barcoded.sam BASE_RANGE=1-12 BARCODED_READ=1 TAG_NAME=XB SUMMARY=input_cell_barcode_summary.txt BASE_QUALITY=10 NUM_BASES_BELOW_QUALITY=1
+rm input.sam
+~/Drop-seq_tools-1.12/TagBamWithReadSequenceExtended INPUT=input_barcoded.sam OUTPUT=input_barcoded_UMI.sam BASE_RANGE=13-20 BARCODED_READ=1 BASE_QUALITY=10 DISCARD_READ=TRUE TAG_NAME=XU
+rm input_barcoded.sam
+~/Drop-seq_tools-1.12/FilterBAM INPUT=input_barcoded_UMI.sam OUTPUT=input_filtered.sam
+rm input_barcoded_UMI.sam
+~/Drop-seq_tools-1.12/TrimStartingSequence I=input_filtered.sam O=input_filtered_ss_trimmed.sam SEQUENCE=AAGCAGTGGTATCAACGCAGAGTGAATGGG MISMATCHES=0 NUM_BASES=6
+rm input_filtered.sam
+~/Drop-seq_tools-1.12/PolyATrimmer I=input_filtered_ss_trimmed.sam O=input_trimmed.sam MISMATCHES=0 NUM_BASES=6
+rm input_filtered_ss_trimmed.sam
+java -Xmx8g -jar ~/picard-tools-1.141/picard.jar SamToFastq INPUT=input_trimmed.sam FASTQ=input_trimmed.fastq
 mkdir mapped/
+~/aligners/STAR/bin/Linux_x86_64_static/STAR --genomeDir ~/scratch/genomes/mm10/DropSeq/ --readFilesIn input_trimmed.fastq --outFileNamePrefix mapped/ --outSAMtype BAM Unsorted --sjdbGTFfile ~/scratch/genomes/mm10/DropSeq/mm10.gtf
+java -jar -Xmx12g ~/picard-tools-1.141/picard.jar MergeBamAlignment UNMAPPED=input_trimmed.sam ALIGNED=mapped/Aligned.out.bam REFERENCE_SEQUENCE=~/scratch/genomes/mm10/DropSeq/mm10.fasta INCLUDE_SECONDARY_ALIGNMENTS=false PAIRED_RUN=false SORT_ORDER=queryname ALIGNED_READS_ONLY=true OUTPUT=input_mapped.bam
+rm input_trimmed.sam
+rm mapped/Aligned.out.bam
+~/Drop-seq_tools-1.12/TagReadWithGeneExon I=input_mapped.bam O=input_mapped_gene_counts.bam TAG=GE ANNOTATIONS_FILE=~/scratch/genomes/mm10/DropSeq/mm10.gtf USE_STRAND_INFO=false ALLOW_MULTI_GENE_READS=false
+rm input_mapped.bam
+~/samtools-1.3/samtools sort input_mapped_gene_counts.bam -o input_mapped_gene_counts.sort.bam
+rm input_mapped_gene_counts.bam
+~/Drop-seq_tools-1.12/DetectBeadSynthesisErrors I=input_mapped_gene_counts.sort.bam O=input_mapped_clean_gene_counts.sort.bam SUMMARY=input_bead_clean_summary.txt CELL_BARCODE_TAG=XB MOLECULAR_BARCODE_TAG=XU GENE_EXON_TAG=GE MIN_UMIS_PER_CELL=10 NUM_BARCODES=10000 OUTPUT_STATS=input_bead_clean_out.txt
+rm input_mapped_gene_counts.sort.bam
+~/Drop-seq_tools-1.12/DigitalExpression SUMMARY=input_DGE_summary.txt O=input_DGE_matrix.txt I=input_mapped_clean_gene_counts.sort.bam CELL_BARCODE_TAG=XB MOLECULAR_BARCODE_TAG=XU GENE_EXON_TAG=GE EDIT_DISTANCE=1 NUM_CORE_BARCODES=10000
+```
 
-~/aligners/STAR/bin/Linux_x86_64_static/STAR --genomeDir ~/scratch/genomes/mm10/STAR/ --runThreadN 8  --readFilesIn input_barcoded_UMI.fastq --outFileNamePrefix mapped/ --outSAMtype BAM Unsorted
+# Analysing the data
 
-java -jar -Xmx8g ~/picard-tools-1.141/picard.jar MergeBamAlignment UNMAPPED=input_barcoded_UMI.sam ALIGNED=mapped/Alignment.bam REFERENCE_SEQUENCE=~/scratch/genomes/mm10/mm10.fa INCLUDE_SECONDARY_AL\
-IGNMENTS=false PAIRED_RUN=false SORT_ORDER=queryname ALIGNED_READS_ONLY=true
+Now that we have digital gene expression profiles we can start analysing it.
+
+```{r eval=FALSE}
+day0_DGE_matrix = read.table(file = "Sample_AAGGAGTA/AAGGAGTA_DGE_matrix.txt", header = TRUE, row.names = 1)
+day2_DGE_matrix = read.table(file = "Sample_ACTGCATA/ACTGCATA_DGE_matrix.txt", header = TRUE, row.names = 1)
+day5_DGE_matrix = read.table(file = "Sample_CTAAGCCT/CTAAGCCT_DGE_matrix.txt", header = TRUE, row.names = 1)
+day8_DGE_matrix = read.table(file = "Sample_GTAAGGAG/GTAAGGAG_DGE_matrix.txt", header = TRUE, row.names = 1)
 ```
 
