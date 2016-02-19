@@ -1,6 +1,6 @@
 ---
 title: "Analysis of Drop-seq data"
-output: html_document
+output: pdf_document
 ---
 
 In this document I will be detailing the analysis of Drop-seq data we received from Sisi Chen of the Thomson lab out of UCSF.  
@@ -166,7 +166,7 @@ hist(all_days_col_sum, breaks = 200, ylim = c(0, 10000), xlab = "all days gene c
 # fit a negative binomial, set min count to be 90th percentile
 library(MASS)
 all_days_col_sum.nb_fit = fitdistr(all_days_col_sum, densfun = "negative binomial")
-all_days_col_sum.thresh = qnbinom(0.9, size = all_days_col_sum.nb_fit$estimate[1], mu = all_days_col_sum.nb_fit$estimate[2])
+all_days_col_sum.thresh = qnbinom(0.95, size = all_days_col_sum.nb_fit$estimate[1], mu = all_days_col_sum.nb_fit$estimate[2])
 day0_DGE_matrix = day0_DGE_matrix[ , colSums(day0_DGE_matrix) > all_days_col_sum.thresh]
 day2_DGE_matrix = day2_DGE_matrix[ , colSums(day2_DGE_matrix) > all_days_col_sum.thresh]
 day5_DGE_matrix = day5_DGE_matrix[ , colSums(day5_DGE_matrix) > all_days_col_sum.thresh]
@@ -184,5 +184,51 @@ day0_DGE_matrix = day0_DGE_matrix[rowSums(day0_DGE_matrix) > 10, ]
 day2_DGE_matrix = day2_DGE_matrix[rowSums(day2_DGE_matrix) > 10, ]
 day5_DGE_matrix = day5_DGE_matrix[rowSums(day5_DGE_matrix) > 10, ]
 day8_DGE_matrix = day8_DGE_matrix[rowSums(day8_DGE_matrix) > 10, ]
+names(day0_DGE_matrix) = paste0("day0_", names(day0_DGE_matrix))
+names(day2_DGE_matrix) = paste0("day2_", names(day2_DGE_matrix))
+names(day5_DGE_matrix) = paste0("day5_", names(day5_DGE_matrix))
+names(day8_DGE_matrix) = paste0("day8_", names(day8_DGE_matrix))
+```
+
+# Clustering cells
+
+## Principal compenent analysis (PCA)
+```{r eval=FALSE}
+# PCA
+# log10 scale first
+# Note that we need to use R/3.0.2, get error "Error in La.svd(x, nu, nv) : error code 1 from Lapack routine 'dgesdd'" with version 3.2.2
+day0_log10_norm_GE = log10(as.matrix(day0_DGE_matrix[rowSums(day0_DGE_matrix > 0) > 5, ]) + 1)
+day0_log10_norm_GE_pca = prcomp(t(day0_log10_norm_GE), corr = TRUE, scale = TRUE)
+plot(day0_log10_norm_GE_pca$x[,1], day0_log10_norm_GE_pca$x[,2], pch = 16, main = "day 0 PCA")
+```
+
+```{r fig.width=6, echo=FALSE}
+library(png)
+library(grid)
+img <- readPNG("day0_log10_norm_GE_pca.png")
+ grid.raster(img)
+```
+
+There doesn't appear to be any groupings here.  Let's look at the effect of sampling depth (number of UMIs per cell) has on the PCA.
+
+```{r eval=FALSE}
+day0_DGE_lib_size = colSums(day0_DGE_matrix)
+day0_DGE_lib_size = day0_DGE_lib_size - min(day0_DGE_lib_size) + 1
+day0_DGE_lib_size = day0_DGE_lib_size/max(day0_DGE_lib_size)
+day0_DGE_lib_size = round(day0_DGE_lib_size*100)
+plot(day0_log10_norm_GE_pca$x[,1], day0_log10_norm_GE_pca$x[,2], pch = 16, main = "day 0 PCA colored by sampling depth", col = day0_DGE_lib_size)
+```
+
+```{r fig.width=6, echo=FALSE}
+library(png)
+library(grid)
+img <- readPNG("day0_log10_norm_GE_pca_libsize_colors.png")
+ grid.raster(img)
+```
+
+It looks like the first principal component is directly accounting for the sampling depth.  The correlation between the two is nearly perfectly -1.
+
+```{r eval=FALSE}
+cor(day0_log10_norm_GE_pca$x[,1], colSums(day0_DGE_matrix)) 
 ```
 
