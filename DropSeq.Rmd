@@ -154,6 +154,35 @@ day0_DGE_matrix = read.table(file = "Sample_AAGGAGTA/AAGGAGTA_DGE_matrix.txt", h
 day2_DGE_matrix = read.table(file = "Sample_ACTGCATA/ACTGCATA_DGE_matrix.txt", header = TRUE, row.names = 1)
 day5_DGE_matrix = read.table(file = "Sample_CTAAGCCT/CTAAGCCT_DGE_matrix.txt", header = TRUE, row.names = 1)
 day8_DGE_matrix = read.table(file = "Sample_GTAAGGAG/GTAAGGAG_DGE_matrix.txt", header = TRUE, row.names = 1)
+# original sizes of the matrices
+dim(day0_DGE_matrix)
+dim(day2_DGE_matrix)
+dim(day5_DGE_matrix)
+dim(day8_DGE_matrix)
+# large number of low count cells
+all_days_col_sum = c(colSums(day0_DGE_matrix), colSums(day2_DGE_matrix), colSums(day5_DGE_matrix), colSums(day8_DGE_matrix))
+hist(all_days_col_sum, breaks = 200, ylim = c(0, 10000), xlab = "all days gene counts")
+# how many counts to require to identify a cell?
+# fit a negative binomial, set min count to be 90th percentile
+library(MASS)
+all_days_col_sum.nb_fit = fitdistr(all_days_col_sum, densfun = "negative binomial")
+all_days_col_sum.thresh = qnbinom(0.9, size = all_days_col_sum.nb_fit$estimate[1], mu = all_days_col_sum.nb_fit$estimate[2])
+day0_DGE_matrix = day0_DGE_matrix[ , colSums(day0_DGE_matrix) > all_days_col_sum.thresh]
+day2_DGE_matrix = day2_DGE_matrix[ , colSums(day2_DGE_matrix) > all_days_col_sum.thresh]
+day5_DGE_matrix = day5_DGE_matrix[ , colSums(day5_DGE_matrix) > all_days_col_sum.thresh]
+day8_DGE_matrix = day8_DGE_matrix[ , colSums(day8_DGE_matrix) > all_days_col_sum.thresh]
+dim(day0_DGE_matrix)
+dim(day2_DGE_matrix)
+dim(day5_DGE_matrix)
+dim(day8_DGE_matrix)
+
+# now we need to combine the days into a full dataset
 length(intersect(intersect(intersect(rownames(day0_DGE_matrix), rownames(day2_DGE_matrix)), rownames(day5_DGE_matrix)), rownames(day8_DGE_matrix)))
+length(union(union(union(rownames(day0_DGE_matrix), rownames(day2_DGE_matrix)), rownames(day5_DGE_matrix)), rownames(day8_DGE_matrix)))
+# filter out genes that don't have many reads
+day0_DGE_matrix = day0_DGE_matrix[rowSums(day0_DGE_matrix) > 10, ]
+day2_DGE_matrix = day2_DGE_matrix[rowSums(day2_DGE_matrix) > 10, ]
+day5_DGE_matrix = day5_DGE_matrix[rowSums(day5_DGE_matrix) > 10, ]
+day8_DGE_matrix = day8_DGE_matrix[rowSums(day8_DGE_matrix) > 10, ]
 ```
 
