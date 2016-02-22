@@ -1,0 +1,161 @@
+---
+title: "Single cell RNA-seq analysis with edgeR"
+author: "Timothy Daley"
+date: "December 1, 2015"
+output: pdf_document
+---
+
+Here I'm going to go through single cell RNA-seq differential expression analysis using edgeR and then discuss how to incorporate normalization procedures into the analysis.
+
+# Preliminaries
+
+First thing we'll have to do is install Bioconductor and edgeR.
+```{r cache=TRUE,message=FALSE}
+source("http://bioconductor.org/biocLite.R")
+biocLite("edgeR")
+library(edgeR)
+install.packages('locfit', repos = "http://cran.r-project.org/", type = "source")
+library(locfit)
+```
+
+We're going to examine the data from [Ting et al. 2014](http://www.sciencedirect.com/science/article/pii/S2211124714007050), available from the Gene Expression Omnibus with accession number [GSE51372](http://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE51372). The Series Matrix File contains important information about the experiments, specifically the identity of each cell (like whether it was a tumor, CTC, et cetera).  I removed the first few lines to get the information that I wanted.
+
+```{r cache=TRUE}
+GSE51372_readCounts = read.delim(file="GSE51372_readCounts.txt", check.names=FALSE, stringsAsFactors=FALSE)
+GSE51372_design_matrix = read.delim(file="GSE51372_design_matrix.txt", check.names=FALSE, stringsAsFactors=FALSE)
+GSE51372_DGEList = DGEList(genes = GSE51372_readCounts[,1:6], counts = GSE51372_readCounts[,7:193])
+```
+
+Let's first look at the distribution of counts.
+
+```{r cache=TRUE}
+hist(GSE51372_DGEList$counts, breaks = 100)
+hist(GSE51372_DGEList$counts, breaks = 100, ylim = c(0, 20000))
+```
+
+It's clear that there is an overabundance of low counts, particularly zero. We will explore this more later.
+
+First a common step is to restrict analysis to cells with sufficiently high counts to prevent analysis on empty wells and genes that are observed in a sufficient number of cells.  On the former, most analysis uses an arbitrary number for the restriction.  Instead I will use a normal-type cutoff, removing those cells with gene sums less than two standard deviations away from the mean gene sum over all cells.
+
+```{r cache=TRUE}
+which(colSums(GSE51372_DGEList$counts) < mean(colSums(GSE51372_DGEList$counts)) - 2*sd(colSums(GSE51372_DGEList$counts)))
+```
+
+Now to look at the gene cut-off.
+```{r cache=TRUE}
+lapply(1:6, function(x) length(which(rowSums(GSE51372_DGEList$counts > 0) > x)))
+```
+
+This is arbitrary, so let's just restrict it to genes that are observed in at least 4 cells.
+
+```{r cache=TRUE}
+GSE51372_DGEList$genes = GSE51372_DGEList$genes[which(rowSums(GSE51372_DGEList$counts > 0) > 4),]
+GSE51372_DGEList$counts = GSE51372_DGEList$counts[which(rowSums(GSE51372_DGEList$counts > 0) > 4),]
+dim(GSE51372_DGEList$genes)
+dim(GSE51372_DGEList$counts)
+```
+
+We need to separate by cell type, contained in the 7th row of GSE51372_design_matrix.  The different cell types and their corresponding labels are as follows.
+
+| Cell type | Label |
+|-----------|------:|
+| single tumor cell circulating in mouse blood | 1 | 
+| single mouse embryonic fibroblast cell | 2 |
+| single cell circulating in mouse blood enriched for tumor cells | 3 |
+| single cell from NB508 mouse pancreatic cancer cell line | 4 |
+| single cancer cell from the primary pancreatic tumor in a mouse | 5 | 
+| mouse pancreatic tumor | 6 | 
+| single mouse white blood cell | 7 | 
+
+```{r cache=TRUE}
+GSE51372_DGEList$samples$group = c(rep(1, times = length(which(GSE51372_design_matrix[7,2:188] == "single tumor cell circulating in mouse blood"))), rep(2, times = length(which(GSE51372_design_matrix[7,2:188] == "single mouse embryonic fibroblast cell"))), rep(3, times = length(which(GSE51372_design_matrix[7,2:188] == "single cell circulating in mouse blood enriched for tumor cells"))), rep(4, times = length(which(GSE51372_design_matrix[7,2:188] == "single cell from NB508 mouse pancreatic cancer cell line"))), rep(5, times = length(which(GSE51372_design_matrix[7,2:188] == "single cancer cell from the primary pancreatic tumor in a mouse"))), rep(6, times = length(which(GSE51372_design_matrix[7,2:188] == "mouse pancreatic tumor"))), rep(7, times = length(which(GSE51372_design_matrix[7,2:188] == "single mouse white blood cell"))))
+GSE51372_DGEList$samples$group
+```
+
+# Examining the data
+
+Let's look at a simple principal component analysis on the data.
+
+```{r cache=TRUE}
+GSE51372_PCA = prcomp(t(GSE51372_DGEList$counts))
+plot(GSE51372_PCA$x[,1], GSE51372_PCA$x[,2], col=rainbow(7)[GSE51372_DGEList$samples$group], pch=16, main = "PCA")
+legend("bottomright", legend = c("single tumor cell circulating in mouse blood", "single mouse embryonic fibroblast cell", "single cell circulating in mouse blood enriched for tumor cells", "single cell from NB508 mouse pancreatic cancer cell line", "single cancer cell from the primary pancreatic tumor in a mouse", "mouse pancreatic tumor", "single mouse white blood cell"), col = rainbow(7)[1:7], pch = 16, cex = 0.67)
+```
+
+It appears that most of the variation in the data is from the circulating tumor cells and cells circulating in tumor enriched blood.  A confounding factor may be sequencing depth, so let's look at that.
+
+```{r}
+x = GSE51372_DGEList$samples$lib.size[c(which(GSE51372_DGEList$samples$group == 1), which(GSE51372_DGEList$samples$group == 3))]
+y = GSE51372_DGEList$samples$lib.size[c(which(GSE51372_DGEList$samples$group == 2), which(GSE51372_DGEList$samples$group == 4), which(GSE51372_DGEList$samples$group == 5), which(GSE51372_DGEList$samples$group == 6), which(GSE51372_DGEList$samples$group == 7))]
+t.test(x, y)
+```
+
+Not a significant difference but certainly a factor. Obviously there are other factors at play here and more complicated clustering will take more time than I am willing to discuss here.
+
+# Naive differential expression with edgeR
+
+Now let's get to the meat of this analysis:  differential expression analysis with edgeR, but without taking into account for problems specific to single cell sequencing.  Let's restrict our analysis to a simple two factor analysis by looking at only two cell types: circulating tumor cells and primary pancreatic tumor cells.
+
+
+```{r cache=TRUE}
+GSE51372_CTC_vs_PTC_DGEList = GSE51372_DGEList
+GSE51372_CTC_vs_PTC_DGEList$samples = GSE51372_CTC_vs_PTC_DGEList$samples[c(which(GSE51372_CTC_vs_PTC_DGEList$samples$group == 1), which(GSE51372_CTC_vs_PTC_DGEList$samples$group == 5)),]
+GSE51372_CTC_vs_PTC_DGEList$counts = GSE51372_CTC_vs_PTC_DGEList$counts[ , c(which(GSE51372_CTC_vs_PTC_DGEList$samples$group == 1), which(GSE51372_CTC_vs_PTC_DGEList$samples$group == 5))]
+GSE51372_CTC_vs_PTC_DGEList = calcNormFactors(GSE51372_CTC_vs_PTC_DGEList)
+GSE51372_CTC_vs_PTC_DGEList.design = model.matrix(~as.factor(GSE51372_CTC_vs_PTC_DGEList$samples$group))
+```
+
+Let's look at the edgeR dispersion factor for these two cell types.
+
+```{r cache=TRUE}
+GSE51372_CTC_vs_PTC_DGEList = estimateDisp(GSE51372_CTC_vs_PTC_DGEList, GSE51372_CTC_vs_PTC_DGEList.design)
+GSE51372_CTC_vs_PTC_DGEList$common.dispersion
+```
+
+This is considerably higher than the examples in the edgeR example cases (see [the vignette](https://bioconductor.org/packages/release/bioc/vignettes/edgeR/inst/doc/edgeRUsersGuide.pdf)).  
+
+```{r cache=TRUE}
+plotBCV(GSE51372_CTC_vs_PTC_DGEList)
+```
+
+## Differential Expression
+
+Now to the differential expression analysis.
+
+```{r cache=TRUE}
+GSE51372_CTC_vs_PTC_glm = glmFit(GSE51372_CTC_vs_PTC_DGEList, GSE51372_CTC_vs_PTC_DGEList.design)
+GSE51372_CTC_vs_PTC_glm_lrt = glmLRT(GSE51372_CTC_vs_PTC_glm)
+topTags(GSE51372_CTC_vs_PTC_glm_lrt)
+```
+
+Let's take a look at the top two genes identified, Ppbp and Clec1b.  
+```{r cache=TRUE}
+GSE51372_CTC_vs_PTC_DGEList$counts[which(GSE51372_CTC_vs_PTC_DGEList$genes$symbol == "Ppbp"),]
+GSE51372_CTC_vs_PTC_DGEList$counts[which(GSE51372_CTC_vs_PTC_DGEList$genes$symbol == "Clec1b"),]
+```
+
+These are genes that are highly expressed in one cell and not the other.  
+
+```{r cache=TRUE}
+summary(GSE51372_CTC_vs_PTC_glm_lrt_de <- decideTestsDGE(GSE51372_CTC_vs_PTC_glm_lrt, adjust.method = "BH"))
+sum(abs(GSE51372_CTC_vs_PTC_glm_lrt_de))/length(GSE51372_CTC_vs_PTC_glm_lrt_de)
+```
+
+Nearly 40% of the genes considered are called differentially expressed, even with Benjamini-Hochberg correction.  The called differentially expressed genes are available in Supplementary Table S1.  The second column contains the genes upregulated in CTCs versus the primary tumor cells and the third column contains genes upregulated in the primary tumor cells versus CTCs.  Let's compare our results versus theirs.  
+
+```{r cache=TRUE}
+GSE51372_diffentially_expressed = read.delim(file = "GSE51372_diffentially_expressed.txt", stringsAsFactors=FALSE)
+length(intersect(GSE51372_diffentially_expressed[,2], GSE51372_CTC_vs_PTC_DGEList$genes$symbol[which(GSE51372_CTC_vs_PTC_glm_lrt_de > 0)]))/(881-3)
+length(intersect(GSE51372_diffentially_expressed[,3], GSE51372_CTC_vs_PTC_DGEList$genes$symbol[which(GSE51372_CTC_vs_PTC_glm_lrt_de < 0)]))/(777-3)
+```
+
+We correctly predict a vast majority of the genes called upregulated in CTCs versus the primary tumor but not upregulated in the primary tumor versus CTCs.  Weird.  Now let's see what happens when we restrict the analysis to the top 878 genes enriched in CTCs versus the primary tumor.
+
+```{r cache=TRUE}
+GSE51372_CTC_vs_PTC_glm_lrt_CTCenriched = GSE51372_CTC_vs_PTC_glm_lrt
+GSE51372_CTC_vs_PTC_glm_lrt_CTCenriched$table = GSE51372_CTC_vs_PTC_glm_lrt_CTCenriched$table[which(GSE51372_CTC_vs_PTC_glm_lrt_CTCenriched$table$logFC > 0),]
+GSE51372_CTC_vs_PTC_glm_lrt_CTCenriched_top878 = topTags(GSE51372_CTC_vs_PTC_glm_lrt_CTCenriched, n = 878)
+length(intersect(GSE51372_CTC_vs_PTC_glm_lrt_CTCenriched_top878$table$symbol, GSE51372_diffentially_expressed[,2]))
+```
+
+Hmmm.  Disappointing.
