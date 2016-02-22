@@ -1,6 +1,6 @@
 ---
 title: "Analysis of Drop-seq data"
-output: pdf_document
+output: html_document
 ---
 
 In this document I will be detailing the analysis of Drop-seq data we received from Sisi Chen of the Thomson lab out of UCSF.  
@@ -149,16 +149,93 @@ rm input_mapped_gene_counts.bam
 
 Now that we have digital gene expression profiles we can start analysing it.
 
-```{r eval=FALSE}
-day0_DGE_matrix = read.table(file = "Sample_AAGGAGTA/AAGGAGTA_DGE_matrix.txt", header = TRUE, row.names = 1)
-day2_DGE_matrix = read.table(file = "Sample_ACTGCATA/ACTGCATA_DGE_matrix.txt", header = TRUE, row.names = 1)
-day5_DGE_matrix = read.table(file = "Sample_CTAAGCCT/CTAAGCCT_DGE_matrix.txt", header = TRUE, row.names = 1)
-day8_DGE_matrix = read.table(file = "Sample_GTAAGGAG/GTAAGGAG_DGE_matrix.txt", header = TRUE, row.names = 1)
+```{r cache=TRUE, fig.height=4}
+day0_DGE_matrix = read.table(file = "AAGGAGTA_DGE_matrix.txt", header = TRUE, row.names = 1)
+day2_DGE_matrix = read.table(file = "ACTGCATA_DGE_matrix.txt", header = TRUE, row.names = 1)
+day5_DGE_matrix = read.table(file = "CTAAGCCT_DGE_matrix.txt", header = TRUE, row.names = 1)
+day8_DGE_matrix = read.table(file = "GTAAGGAG_DGE_matrix.txt", header = TRUE, row.names = 1)
 # original sizes of the matrices
 dim(day0_DGE_matrix)
 dim(day2_DGE_matrix)
 dim(day5_DGE_matrix)
 dim(day8_DGE_matrix)
+
+```
+
+# Aggregate gene expression analysis
+
+For a rough idea of the differences between time points we can combine the single cells into a single experiment and look at differential expression.
+
+```{r cache=TRUE}
+# treat combined single cells as a low-input RNA-seq experiment
+day0_combined_DGE = rowSums(day0_DGE_matrix)
+day2_combined_DGE = rowSums(day2_DGE_matrix)
+day5_combined_DGE = rowSums(day5_DGE_matrix)
+day8_combined_DGE = rowSums(day8_DGE_matrix)
+# workaround to get all genes
+all_days_combined_DGE = mat.or.vec(nr = length(union(names(day0_combined_DGE), union(names(day2_combined_DGE), union(names(day5_combined_DGE), names(day8_combined_DGE))))), nc = 4)
+rownames(all_days_combined_DGE) = union(names(day0_combined_DGE), union(names(day2_combined_DGE), union(names(day5_combined_DGE), names(day8_combined_DGE))))
+colnames(all_days_combined_DGE) = c("day0", "day2", "day5", "day8")
+
+for(i in rownames(all_days_combined_DGE)){
+  if(i %in% names(day0_combined_DGE)){
+    all_days_combined_DGE[i, "day0"] = day0_combined_DGE[i]
+  }}
+for(i in rownames(all_days_combined_DGE)){
+  if(i %in% names(day2_combined_DGE)){
+    all_days_combined_DGE[i, "day2"] = day2_combined_DGE[i]
+  }}
+for(i in rownames(all_days_combined_DGE)){
+  if(i %in% names(day5_combined_DGE)){
+    all_days_combined_DGE[i, "day5"] = day5_combined_DGE[i]
+  }}
+for(i in rownames(all_days_combined_DGE)){
+  if(i %in% names(day8_combined_DGE)){
+    all_days_combined_DGE[i, "day8"] = day8_combined_DGE[i]
+  }}
+
+#filter missing genes
+all_days_combined_DGE = all_days_combined_DGE[which(rowSums(all_days_combined_DGE) > 1), ]
+
+# use DESeq2 to look for differentially expressed genes
+source("https://bioconductor.org/biocLite.R")
+biocLite("DESeq2")
+library(DESeq2)
+all_days_combined_coldata = data.frame("days" = c(0, 2, 5, 8))
+rownames(all_days_combined_coldata) = c("day0", "day2", "day5", "day8")
+all_days_combined_deseqdataseq = DESeqDataSetFromMatrix(countData=all_days_combined_DGE, colData= all_days_combined_coldata, design = ~ days)
+# LRT, null model is empty, intercept only
+all_days_combined_deseq = DESeq(all_days_combined_deseqdataseq, test="Wald")
+all_days_combined_deseq_results = results(all_days_combined_deseq)
+head(all_days_combined_deseq_results[order(all_days_combined_deseq_results$padj),])
+all_days_combined_DGE[rownames(head(all_days_combined_deseq_results[order(all_days_combined_deseq_results$padj),])), ]
+head(all_days_combined_deseq_results[order(all_days_combined_deseq_results$log2FoldChange, decreasing = TRUE),])
+all_days_combined_DGE[rownames(head(all_days_combined_deseq_results[order(all_days_combined_deseq_results$log2FoldChange, decreasing = TRUE), ])), ]
+```
+
+```{r cache=TRUE, fig.width=5}
+all_days_combined_top_genes = head(order(all_days_combined_deseq_results$padj), length(which(all_days_combined_deseq_results$padj < 0.05)))
+all_days_combined_DGE[all_days_combined_top_genes, ]
+# heatmap of top expressed genes
+install.packages('pheatmap', repos = "http://cran.r-project.org")
+library(pheatmap)
+pheatmap(all_days_combined_DGE[all_days_combined_top_genes, ], cluster_col = FALSE)
+```
+
+There appears to be two major modules here, one in days 0, 2, and 5 consisting of Pim2, Igf2, Anxa2, Lgals1, Pou3f1, Krt18, Id1, and Nes and one in day 8 consisting of Bmp4, Slc30a2, Klf4, Alpl, and Calb2.  Additionally it appears to be two very specific genes, Gal for day 0 and Tdgf1 for day 8. 
+
+```{r cache=TRUE, fig.width=5}
+# increase FDR to 0.1
+all_days_combined_top_genes = head(order(all_days_combined_deseq_results$padj), length(which(all_days_combined_deseq_results$padj < 0.1)))
+# heatmap of top expressed genes
+pheatmap(all_days_combined_DGE[all_days_combined_top_genes, ], cluster_col = FALSE)
+```
+
+# Single cell analysis
+
+## How many cells to consider?
+
+```{r cache=TRUE, fig.width=5}
 # large number of low count cells
 all_days_col_sum = c(colSums(day0_DGE_matrix), colSums(day2_DGE_matrix), colSums(day5_DGE_matrix), colSums(day8_DGE_matrix))
 hist(all_days_col_sum, breaks = 200, ylim = c(0, 10000), xlab = "all days gene counts")
@@ -166,7 +243,7 @@ hist(all_days_col_sum, breaks = 200, ylim = c(0, 10000), xlab = "all days gene c
 # fit a negative binomial, set min count to be 90th percentile
 library(MASS)
 all_days_col_sum.nb_fit = fitdistr(all_days_col_sum, densfun = "negative binomial")
-all_days_col_sum.thresh = qnbinom(0.95, size = all_days_col_sum.nb_fit$estimate[1], mu = all_days_col_sum.nb_fit$estimate[2])
+all_days_col_sum.thresh = qnbinom(0.99, size = all_days_col_sum.nb_fit$estimate[1], mu = all_days_col_sum.nb_fit$estimate[2])
 day0_DGE_matrix = day0_DGE_matrix[ , colSums(day0_DGE_matrix) > all_days_col_sum.thresh]
 day2_DGE_matrix = day2_DGE_matrix[ , colSums(day2_DGE_matrix) > all_days_col_sum.thresh]
 day5_DGE_matrix = day5_DGE_matrix[ , colSums(day5_DGE_matrix) > all_days_col_sum.thresh]
@@ -193,7 +270,7 @@ names(day8_DGE_matrix) = paste0("day8_", names(day8_DGE_matrix))
 # Clustering cells
 
 ## Principal compenent analysis (PCA)
-```{r eval=FALSE}
+```{r fig.width=5, cache=TRUE}
 # PCA
 # log10 scale first
 # Note that we need to use R/3.0.2, get error "Error in La.svd(x, nu, nv) : error code 1 from Lapack routine 'dgesdd'" with version 3.2.2
@@ -202,16 +279,9 @@ day0_log10_norm_GE_pca = prcomp(t(day0_log10_norm_GE), corr = TRUE, scale = TRUE
 plot(day0_log10_norm_GE_pca$x[,1], day0_log10_norm_GE_pca$x[,2], pch = 16, main = "day 0 PCA")
 ```
 
-```{r fig.width=6, echo=FALSE}
-library(png)
-library(grid)
-img <- readPNG("day0_log10_norm_GE_pca.png")
- grid.raster(img)
-```
-
 There doesn't appear to be any groupings here.  Let's look at the effect of sampling depth (number of UMIs per cell) has on the PCA.
 
-```{r eval=FALSE}
+```{r fig.width=5, cache=TRUE}
 day0_DGE_lib_size = colSums(day0_DGE_matrix)
 day0_DGE_lib_size = day0_DGE_lib_size - min(day0_DGE_lib_size) + 1
 day0_DGE_lib_size = day0_DGE_lib_size/max(day0_DGE_lib_size)
@@ -219,16 +289,25 @@ day0_DGE_lib_size = round(day0_DGE_lib_size*100)
 plot(day0_log10_norm_GE_pca$x[,1], day0_log10_norm_GE_pca$x[,2], pch = 16, main = "day 0 PCA colored by sampling depth", col = day0_DGE_lib_size)
 ```
 
-```{r fig.width=6, echo=FALSE}
-library(png)
-library(grid)
-img <- readPNG("day0_log10_norm_GE_pca_libsize_colors.png")
- grid.raster(img)
+
+It looks like the first principal component is directly accounting for the sampling depth.  In fact, in all time points the correlation between the two is nearly perfectly -1.
+
+```{r cache=TRUE}
+day2_log10_norm_GE = log10(as.matrix(day2_DGE_matrix[rowSums(day2_DGE_matrix > 0) > 5, ]) + 1)
+day2_log10_norm_GE_pca = prcomp(t(day2_log10_norm_GE), corr = TRUE, scale = TRUE)
+day5_log10_norm_GE = log10(as.matrix(day5_DGE_matrix[rowSums(day5_DGE_matrix > 0) > 5, ]) + 1)
+day5_log10_norm_GE_pca = prcomp(t(day5_log10_norm_GE), corr = TRUE, scale = TRUE)
+day8_log10_norm_GE = log10(as.matrix(day8_DGE_matrix[rowSums(day8_DGE_matrix > 0) > 5, ]) + 1)
+day8_log10_norm_GE_pca = prcomp(t(day8_log10_norm_GE), corr = TRUE, scale = TRUE)
+
+c(cor(day0_log10_norm_GE_pca$x[,1], colSums(day0_DGE_matrix)), cor(day2_log10_norm_GE_pca$x[,1], colSums(day2_DGE_matrix)), cor(day5_log10_norm_GE_pca$x[,1], colSums(day5_DGE_matrix)), cor(day8_log10_norm_GE_pca$x[,1], colSums(day8_DGE_matrix)) )
 ```
 
-It looks like the first principal component is directly accounting for the sampling depth.  The correlation between the two is nearly perfectly -1.
+Since the first factor is effectively the sampling depth we can look at the second and third components.
 
-```{r eval=FALSE}
-cor(day0_log10_norm_GE_pca$x[,1], colSums(day0_DGE_matrix)) 
+```{r fig.width=5, cache=TRUE}
+plot(day0_log10_norm_GE_pca$x[,2], day0_log10_norm_GE_pca$x[,3], pch = 16, main = "day 0 PCA 2nd & 3rd")
 ```
+
+There doesn't appear to be definitive clusters of cells, except for the possibility that there is one major cluster with outliers.  It may be that we need to properly normalize the gene expression counts to account for sampling depth.
 
