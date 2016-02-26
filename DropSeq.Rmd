@@ -252,29 +252,68 @@ dim(day0_DGE_matrix)
 dim(day2_DGE_matrix)
 dim(day5_DGE_matrix)
 dim(day8_DGE_matrix)
+# we should really fit a two component distribution and select only those in the larger distro
+
+# let's consider the top 100 cells for each condition to make like easier
+day0_top100cells_DGE_matrix = day0_DGE_matrix[ ,sort(colSums(day0_DGE_matrix), index = T, decreasing = TRUE)$ix[1:100]]
+day2_top100cells_DGE_matrix = day2_DGE_matrix[ ,sort(colSums(day2_DGE_matrix), index = T, decreasing = TRUE)$ix[1:100]]
+day5_top100cells_DGE_matrix = day5_DGE_matrix[ ,sort(colSums(day5_DGE_matrix), index = T, decreasing = TRUE)$ix[1:100]]
+day8_top100cells_DGE_matrix = day8_DGE_matrix[ ,sort(colSums(day8_DGE_matrix), index = T, decreasing = TRUE)$ix[1:100]]
 
 # now we need to combine the days into a full dataset
-length(intersect(intersect(intersect(rownames(day0_DGE_matrix), rownames(day2_DGE_matrix)), rownames(day5_DGE_matrix)), rownames(day8_DGE_matrix)))
-length(union(union(union(rownames(day0_DGE_matrix), rownames(day2_DGE_matrix)), rownames(day5_DGE_matrix)), rownames(day8_DGE_matrix)))
-# filter out genes that don't have many reads
-day0_DGE_matrix = day0_DGE_matrix[rowSums(day0_DGE_matrix) > 10, ]
-day2_DGE_matrix = day2_DGE_matrix[rowSums(day2_DGE_matrix) > 10, ]
-day5_DGE_matrix = day5_DGE_matrix[rowSums(day5_DGE_matrix) > 10, ]
-day8_DGE_matrix = day8_DGE_matrix[rowSums(day8_DGE_matrix) > 10, ]
-names(day0_DGE_matrix) = paste0("day0_", names(day0_DGE_matrix))
-names(day2_DGE_matrix) = paste0("day2_", names(day2_DGE_matrix))
-names(day5_DGE_matrix) = paste0("day5_", names(day5_DGE_matrix))
-names(day8_DGE_matrix) = paste0("day8_", names(day8_DGE_matrix))
+length(intersect(intersect(intersect(rownames(day0_top100cells_DGE_matrix), rownames(day2_top100cells_DGE_matrix)), rownames(day5_top100cells_DGE_matrix)), rownames(day8_top100cells_DGE_matrix)))
+length(union(union(union(rownames(day0_top100cells_DGE_matrix), rownames(day2_top100cells_DGE_matrix)), rownames(day5_top100cells_DGE_matrix)), rownames(day8_top100cells_DGE_matrix)))
 ```
 
-# Clustering cells
+```{r cache=TRUE, fig.width=5}
+# filter out genes that don't have many reads
+day0_top100cells_DGE_matrix = day0_top100cells_DGE_matrix[rowSums(day0_top100cells_DGE_matrix) > 5, ]
+day2_top100cells_DGE_matrix = day2_top100cells_DGE_matrix[rowSums(day2_top100cells_DGE_matrix) > 5, ]
+day5_top100cells_DGE_matrix = day5_top100cells_DGE_matrix[rowSums(day5_top100cells_DGE_matrix) > 5, ]
+day8_top100cells_DGE_matrix = day8_top100cells_DGE_matrix[rowSums(day8_top100cells_DGE_matrix) > 5, ]
 
-## Principal compenent analysis (PCA)
+all_days_DGE = mat.or.vec(nr = length(union(union(union(rownames(day0_top100cells_DGE_matrix), rownames(day2_top100cells_DGE_matrix)), rownames(day5_top100cells_DGE_matrix)), rownames(day8_top100cells_DGE_matrix))), nc = 400)
+rownames(all_days_DGE) = union(rownames(day0_top100cells_DGE_matrix), union(rownames(day2_top100cells_DGE_matrix), union(rownames(day5_top100cells_DGE_matrix), rownames(day8_top100cells_DGE_matrix))))
+colnames(all_days_DGE) = c(paste0("day0", colnames(day0_top100cells_DGE_matrix)), paste0("day2", colnames(day2_top100cells_DGE_matrix)), paste0("day5", colnames(day5_top100cells_DGE_matrix)), paste0("day8", colnames(day8_top100cells_DGE_matrix)))
+
+for(i in rownames(all_days_DGE)){
+  for(j in 1:100){
+    if(i %in% rownames(day0_top100cells_DGE_matrix)){
+      all_days_DGE[i, j] = day0_top100cells_DGE_matrix[i,j]
+    }
+  }
+}
+for(i in rownames(all_days_DGE)){
+  for(j in 1:100){
+    if(i %in% rownames(day2_top100cells_DGE_matrix)){
+      all_days_DGE[i, j + 100] = day2_top100cells_DGE_matrix[i,j]
+    }
+  }
+}
+for(i in rownames(all_days_DGE)){
+  for(j in 1:100){
+    if(i %in% rownames(day5_top100cells_DGE_matrix)){
+      all_days_DGE[i, j + 200] = day5_top100cells_DGE_matrix[i,j]
+    }
+  }
+}
+for(i in rownames(all_days_DGE)){
+  for(j in 1:100){
+    if(i %in% rownames(day8_top100cells_DGE_matrix)){
+      all_days_DGE[i, j + 300] = day8_top100cells_DGE_matrix[i,j]
+    }
+  }
+}
+```
+
+## Clustering cells
+
+### Principal compenent analysis (PCA)
 ```{r fig.width=5, cache=TRUE}
 # PCA
 # log10 scale first
 # Note that we need to use R/3.0.2, get error "Error in La.svd(x, nu, nv) : error code 1 from Lapack routine 'dgesdd'" with version 3.2.2
-day0_log10_norm_GE = log10(as.matrix(day0_DGE_matrix[rowSums(day0_DGE_matrix > 0) > 5, ]) + 1)
+day0_log10_norm_GE = log10(as.matrix(day0_top100cells_DGE_matrix[rowSums(day0_top100cells_DGE_matrix > 0) > 5, ]) + 1)
 day0_log10_norm_GE_pca = prcomp(t(day0_log10_norm_GE), corr = TRUE, scale = TRUE)
 plot(day0_log10_norm_GE_pca$x[,1], day0_log10_norm_GE_pca$x[,2], pch = 16, main = "day 0 PCA")
 ```
@@ -282,7 +321,7 @@ plot(day0_log10_norm_GE_pca$x[,1], day0_log10_norm_GE_pca$x[,2], pch = 16, main 
 There doesn't appear to be any groupings here.  Let's look at the effect of sampling depth (number of UMIs per cell) has on the PCA.
 
 ```{r fig.width=5, cache=TRUE}
-day0_DGE_lib_size = colSums(day0_DGE_matrix)
+day0_DGE_lib_size = colSums(day0_top100cells_DGE_matrix)
 day0_DGE_lib_size = day0_DGE_lib_size - min(day0_DGE_lib_size) + 1
 day0_DGE_lib_size = day0_DGE_lib_size/max(day0_DGE_lib_size)
 day0_DGE_lib_size = round(day0_DGE_lib_size*100)
@@ -293,14 +332,14 @@ plot(day0_log10_norm_GE_pca$x[,1], day0_log10_norm_GE_pca$x[,2], pch = 16, main 
 It looks like the first principal component is directly accounting for the sampling depth.  In fact, in all time points the correlation between the two is nearly perfectly -1.
 
 ```{r cache=TRUE}
-day2_log10_norm_GE = log10(as.matrix(day2_DGE_matrix[rowSums(day2_DGE_matrix > 0) > 5, ]) + 1)
+day2_log10_norm_GE = log10(as.matrix(day2_top100cells_DGE_matrix[rowSums(day2_top100cells_DGE_matrix > 0) > 5, ]) + 1)
 day2_log10_norm_GE_pca = prcomp(t(day2_log10_norm_GE), corr = TRUE, scale = TRUE)
-day5_log10_norm_GE = log10(as.matrix(day5_DGE_matrix[rowSums(day5_DGE_matrix > 0) > 5, ]) + 1)
+day5_log10_norm_GE = log10(as.matrix(day5_top100cells_DGE_matrix[rowSums(day5_top100cells_DGE_matrix > 0) > 5, ]) + 1)
 day5_log10_norm_GE_pca = prcomp(t(day5_log10_norm_GE), corr = TRUE, scale = TRUE)
-day8_log10_norm_GE = log10(as.matrix(day8_DGE_matrix[rowSums(day8_DGE_matrix > 0) > 5, ]) + 1)
+day8_log10_norm_GE = log10(as.matrix(day8_top100cells_DGE_matrix[rowSums(day8_top100cells_DGE_matrix > 0) > 5, ]) + 1)
 day8_log10_norm_GE_pca = prcomp(t(day8_log10_norm_GE), corr = TRUE, scale = TRUE)
 
-c(cor(day0_log10_norm_GE_pca$x[,1], colSums(day0_DGE_matrix)), cor(day2_log10_norm_GE_pca$x[,1], colSums(day2_DGE_matrix)), cor(day5_log10_norm_GE_pca$x[,1], colSums(day5_DGE_matrix)), cor(day8_log10_norm_GE_pca$x[,1], colSums(day8_DGE_matrix)) )
+c(cor(day0_log10_norm_GE_pca$x[,1], colSums(day0_top100cells_DGE_matrix)), cor(day2_log10_norm_GE_pca$x[,1], colSums(day2_top100cells_DGE_matrix)), cor(day5_log10_norm_GE_pca$x[,1], colSums(day5_top100cells_DGE_matrix)), cor(day8_log10_norm_GE_pca$x[,1], colSums(day8_top100cells_DGE_matrix)) )
 ```
 
 Since the first factor is effectively the sampling depth we can look at the second and third components.
@@ -311,3 +350,122 @@ plot(day0_log10_norm_GE_pca$x[,2], day0_log10_norm_GE_pca$x[,3], pch = 16, main 
 
 There doesn't appear to be definitive clusters of cells, except for the possibility that there is one major cluster with outliers.  It may be that we need to properly normalize the gene expression counts to account for sampling depth.
 
+
+## Single-cell differential expression
+
+We'll use the package scde from [Kharchenko et al.](http://www.nature.com/nmeth/journal/v11/n7/abs/nmeth.2967.html) to look at differential expression in the cells.
+
+```{r cache=TRUE, fig.width=5, warning=FALSE, message=FALSE}
+install.packages('devtools', repos = "http://cran.r-project.org")
+require(devtools)
+install_github('hms-dbmi/scde', build_vignettes = FALSE)
+require(scde)
+```
+
+```{r cache=TRUE, fig.width=5}
+dim(all_days_DGE)
+all_days_DGE = apply(all_days_DGE, 2, function(x) {storage.mode(x) <- 'integer'; x})
+all_days_DGE_scde = scde.error.models(all_days_DGE, groups = c(rep(0, times = 100), rep(2, times = 100), rep(5, times = 100), rep(8, times = 100)), save.model.plots = FALSE)
+# look at number of "valid" cells
+length(all_days_DGE_scde$corr.a > 0)
+# all cells are valid.  Hooray!
+all_days_DGE_scde_prior = scde.expression.prior(models = all_days_DGE_scde, counts = all_days_DGE, show.plot = TRUE)
+```
+
+### Day 0 vs Day 8 differential expression
+```{r cache=TRUE, fig.width=5}
+groups = factor(gsub("(day0|day8).*", "\\1", rownames(all_days_DGE_scde)), levels  =  c("day0", "day8"))
+day0_vs_day8_scde_diff = scde.expression.difference(all_days_DGE_scde, all_days_DGE, all_days_DGE_scde_prior, groups = groups)
+write.table(day0_vs_day8_scde_diff[order(abs(day0_vs_day8_scde_diff$Z), decreasing = TRUE), ], file = "day0_vs_day8_scde_diff.txt", sep = "\t", quote = FALSE, row.names = TRUE, col.names = TRUE)
+```
+
+### Day 0 vs Day 2 differential expression
+```{r cache=TRUE, fig.width=5}
+groups = factor(gsub("(day0|day2).*", "\\1", rownames(all_days_DGE_scde)), levels  =  c("day0", "day2"))
+day0_vs_day2_scde_diff = scde.expression.difference(all_days_DGE_scde, all_days_DGE, all_days_DGE_scde_prior, groups = groups)
+write.table(day0_vs_day2_scde_diff[order(abs(day0_vs_day2_scde_diff$Z), decreasing = TRUE), ], file = "day0_vs_day2_scde_diff.txt", sep = "\t", quote = FALSE, row.names = TRUE, col.names = TRUE)
+```
+
+### Day 0 vs Day 5 differential expression
+```{r cache=TRUE, fig.width=5}
+groups = factor(gsub("(day0|day5).*", "\\1", rownames(all_days_DGE_scde)), levels  =  c("day0", "day5"))
+day0_vs_day5_scde_diff = scde.expression.difference(all_days_DGE_scde, all_days_DGE, all_days_DGE_scde_prior, groups = groups)
+write.table(day0_vs_day5_scde_diff[order(abs(day0_vs_day5_scde_diff$Z), decreasing = TRUE), ], file = "day0_vs_day5_scde_diff.txt", sep = "\t", quote = FALSE, row.names = TRUE, col.names = TRUE)
+```
+
+### Day 2 vs Day 5 differential expression
+```{r cache=TRUE, fig.width=5}
+groups = factor(gsub("(day2|day5).*", "\\1", rownames(all_days_DGE_scde)), levels  =  c("day2", "day5"))
+day2_vs_day5_scde_diff = scde.expression.difference(all_days_DGE_scde, all_days_DGE, all_days_DGE_scde_prior, groups = groups)
+write.table(day2_vs_day5_scde_diff[order(abs(day2_vs_day5_scde_diff$Z), decreasing = TRUE), ], file = "day2_vs_day5_scde_diff.txt", sep = "\t", quote = FALSE, row.names = TRUE, col.names = TRUE)
+```
+
+### Day 2 vs Day 8 differential expression
+```{r cache=TRUE, fig.width=5}
+groups = factor(gsub("(day2|day8).*", "\\1", rownames(all_days_DGE_scde)), levels  =  c("day2", "day8"))
+day2_vs_day8_scde_diff = scde.expression.difference(all_days_DGE_scde, all_days_DGE, all_days_DGE_scde_prior, groups = groups)
+write.table(day2_vs_day8_scde_diff[order(abs(day2_vs_day8_scde_diff$Z), decreasing = TRUE), ], file = "day2_vs_day8_scde_diff.txt", sep = "\t", quote = FALSE, row.names = TRUE, col.names = TRUE)
+```
+
+### Day 5 vs Day 8 differential expression
+```{r cache=TRUE, fig.width=5}
+groups = factor(gsub("(day5|day8).*", "\\1", rownames(all_days_DGE_scde)), levels  =  c("day5", "day8"))
+day5_vs_day8_scde_diff = scde.expression.difference(all_days_DGE_scde, all_days_DGE, all_days_DGE_scde_prior, groups = groups)
+write.table(day5_vs_day8_scde_diff[order(abs(day5_vs_day8_scde_diff$Z), decreasing = TRUE), ], file = "day5_vs_day8_scde_diff.txt", sep = "\t", quote = FALSE, row.names = TRUE, col.names = TRUE)
+```
+
+
+
+
+### Loading ENSEMBL reference from BioMart
+
+```{r cache=TRUE, fig.width=5}
+biocLite("biomaRt")
+library(biomaRt)
+biocLite("GO.db")
+library(GO.db)
+ensembl = useMart("ensembl", dataset="mmusculus_gene_ensembl")
+go = getBM(attributes = c("external_gene_name", "go_id"), filters = "external_gene_name", values = rownames(all_days_DGE), mart = ensembl)
+go$term = Term(go$go_id)
+s = split(go$external_gene_name, paste(go$go_id,go$term))
+go.env = list2env(s)
+
+```
+
+```{r cache=TRUE, fig.width=5}
+all_days_DGE_varinfo = pagoda.varnorm(all_days_DGE_scde, counts = all_days_DGE, max.adj.var = 12)
+
+all_days_DGE_varinfo_minus_libsize = pagoda.subtract.aspect(all_days_DGE_varinfo, colSums(all_days_DGE[, rownames(all_days_DGE_scde)]>0))
+```
+
+```{r cache=TRUE, fig.width=5}
+all_days_DGE_scde_pwpca = pagoda.pathway.wPCA(all_days_DGE_varinfo_minus_libsize, go.env, n.components = 1, n.cores = 1)
+
+all_days_DGE_scde_pwpca_df = pagoda.top.aspects(all_days_DGE_scde_pwpca, return.table = TRUE, plot = TRUE, z.score = 1.96)
+head(all_days_DGE_scde_pwpca_df)
+```
+
+```{r cache=TRUE, fig.width=5}
+all_days_DGE_scde_gene_clusters = pagoda.gene.clusters(all_days_DGE_varinfo_minus_libsize, n.clusters = 200, n.samples = 100, plot = TRUE, n.cores = 1)
+
+all_days_DGE_scde_top_gene_clusters = pagoda.top.aspects(all_days_DGE_scde_pwpca, all_days_DGE_scde_gene_clusters, return.table = TRUE, plot = TRUE, z.score = 1.96)
+head(all_days_DGE_scde_top_gene_clusters)
+```
+
+```{r cache=TRUE, fig.width=5}
+all_days_DGE_scde_all_gene_clusters = pagoda.top.aspects(all_days_DGE_scde_pwpca, all_days_DGE_scde_gene_clusters, n.cells = NULL, z.score = qnorm(0.01/2, lower.tail = FALSE))
+```
+```{r cache=TRUE, fig.width=5}
+all_days_DGE_scde_cluster_cells = pagoda.cluster.cells(all_days_DGE_scde_all_gene_clusters, all_days_DGE_varinfo_minus_libsize)
+```
+```{r cache=TRUE, fig.width=5}
+all_days_DGE_scde_reduced_gene_clusters = pagoda.reduce.loading.redundancy(all_days_DGE_scde_all_gene_clusters, all_days_DGE_scde_pwpca, all_days_DGE_scde_gene_clusters)
+```
+```{r cache=TRUE, fig.width=5}
+all_days_DGE_scde_reduced_gene_clusters2 = pagoda.reduce.redundancy(all_days_DGE_scde_reduced_gene_clusters, distance.threshold = 0.9, plot = TRUE, cell.clustering = all_days_DGE_scde_cluster_cells, box = TRUE, margins = c(0.5,0.5))
+```
+
+```{r cache=TRUE}
+col.cols <- rbind(groups = cutree(all_days_DGE_scde_cluster_cells, 20))
+pagoda.view.aspects(all_days_DGE_scde_reduced_gene_clusters2, cell.clustering = all_days_DGE_scde_cluster_cells, box = TRUE, labCol = NA, margins = c(0.5, 30), col.cols = col.cols)
+```
